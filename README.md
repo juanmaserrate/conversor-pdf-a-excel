@@ -20,6 +20,18 @@ Convierte PDFs a **Excel**, **CSV** o **JSON** desde el navegador, sin instalar 
 | **Todo el texto + tablas** | Pone todo el contenido del PDF en una sola hoja. |
 | **Solo tablas** | Cada tabla detectada va en una hoja separada. |
 
+## PDFs escaneados
+
+Si el PDF es un escaneo o una foto de papel, el notebook lo detecta y reconoce el texto
+(OCR, en español e inglés) antes de convertir. Tarda unos segundos más por página.
+
+- **Automático** (por defecto): aplica OCR solo a las páginas que no tienen texto.
+- **Forzar en todas las páginas**: para PDFs que tienen texto pero salen con caracteres raros.
+- **Desactivado**: no aplica OCR.
+
+Para mejores resultados: escaneos derechos, nítidos y de al menos 200 dpi.
+Las tablas con bordes se detectan mucho mejor que las que no tienen líneas.
+
 ## Privacidad
 
 Cada persona ejecuta el notebook en su propia máquina temporal de Google.
