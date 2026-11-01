@@ -757,7 +757,11 @@ def test_workflow_pins_actions_and_has_required_jobs() -> None:
     assert uses
     for action in uses:
         assert re.fullmatch(r"[\w.-]+/[\w.-]+@v\d+\.\d+\.\d+", action), f"acción sin versión fija: {action}"
-    assert wf["jobs"]["release"]["if"].startswith("startsWith(github.ref, 'refs/tags/v')")
+    release_if = wf["jobs"]["release"]["if"]
+    assert "always()" in release_if and "needs.build-windows.result == 'success'" in release_if
+    assert "startsWith(github.ref, 'refs/tags/v')" in release_if and "inputs.release_tag" in release_if
+    assert on["workflow_dispatch"]["inputs"]["release_tag"]["required"] is False
+    assert "RELEASE_TAG" in wf["env"]
     assert wf["jobs"]["release"]["needs"] == ["build-windows", "build-macos"]
     assert wf["jobs"]["build-windows"]["runs-on"] == "windows-2025"
     assert wf["jobs"]["build-macos"]["runs-on"] == "macos-14"
