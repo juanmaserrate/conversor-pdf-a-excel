@@ -66,6 +66,9 @@ def load_options() -> Options:
             values[f.name] = Path(text) if text else None
         elif f.name in _BOOL_FIELDS or isinstance(default, bool):
             values[f.name] = _to_bool(raw, bool(default))
+        elif f.name == "layout":
+            text = str(raw).strip().lower() if raw is not None else ""
+            values[f.name] = text if text in ("auto", "layout", "tables") else default
         elif isinstance(default, str):
             text = str(raw).strip() if raw is not None else ""
             values[f.name] = text or default
@@ -121,6 +124,15 @@ class SettingsDialog(QDialog):
             idx = self.lang_combo.count() - 1
         self.lang_combo.setCurrentIndex(idx)
         form.addRow(S.ADVANCED_OCR_LANG, self.lang_combo)
+
+        self.layout_combo = QComboBox(self)
+        self.layout_combo.setAccessibleName(S.ADVANCED_LAYOUT)
+        self.layout_combo.setToolTip(S.ADVANCED_LAYOUT_TIP)
+        for label, code in S.ADVANCED_LAYOUT_CHOICES:
+            self.layout_combo.addItem(label, code)
+        layout_idx = self.layout_combo.findData(opts.layout)
+        self.layout_combo.setCurrentIndex(max(0, layout_idx))
+        form.addRow(S.ADVANCED_LAYOUT, self.layout_combo)
 
         self.merge_check = self._check(S.ADVANCED_MERGE, opts.merge_continuations)
         self.include_text_check = self._check(S.ADVANCED_INCLUDE_TEXT, opts.include_text)
@@ -189,9 +201,11 @@ class SettingsDialog(QDialog):
     def options(self) -> Options:
         """``Options`` con lo elegido en el diálogo (conserva ``typed_values`` y ``output_dir`` iniciales)."""
         lang = self.lang_combo.currentData()
+        layout_mode = self.layout_combo.currentData()
         return dataclasses.replace(
             self._initial,
             ocr_lang=str(lang) if lang else self._initial.ocr_lang,
+            layout=layout_mode if layout_mode in ("auto", "layout", "tables") else self._initial.layout,
             merge_continuations=self.merge_check.isChecked(),
             include_text=self.include_text_check.isChecked(),
             one_sheet_per_page=self.one_sheet_check.isChecked(),

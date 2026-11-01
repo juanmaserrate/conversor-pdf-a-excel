@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 
 from pdf2excel.errors import UserError
 from pdf2excel.jobs.worker import JobQueue
-from pdf2excel.models import ConversionReport, Options
+from pdf2excel.models import ConversionReport, EffectiveMode, Options
 from pdf2excel.ui import strings_es as S
 from pdf2excel.ui.pages.done_page import MAX_OPEN_EXCEL, DonePage
 from pdf2excel.ui.pages.drop_page import DropPage
@@ -70,6 +70,8 @@ _ANALYSIS_FIELDS = (
     "one_sheet_per_page",
     "force_ocr",
     "ocr_lang",
+    "layout",
+    "layout_images",
 )
 
 
@@ -192,6 +194,8 @@ class MainWindow(QMainWindow):
         self._phase: Phase = "idle"
         self._cancelled = False
         self._analysis_key: tuple[object, ...] | None = None
+        # Formato del Excel que el usuario eligió a mano por archivo (sobrevive a un reanálisis).
+        self._mode_overrides: dict[str, EffectiveMode] = {}
         self._batch: list[str] = []  # archivos del lote en curso (para "Archivo i de n")
         self._closing = False  # closeEvent aceptado o diferido (esperando un job que no honró cancel)
 
@@ -244,6 +248,7 @@ class MainWindow(QMainWindow):
         # ---- señales de las pantallas
         self.drop_page.files_chosen.connect(self.start_analysis)
         self.review_page.save_requested.connect(self._on_save_requested)
+        self.review_page.mode_changed.connect(self._on_mode_changed)
         self.review_page.back_requested.connect(self._on_back_requested)
         self.progress_page.cancel_requested.connect(self._on_cancel_requested)
         self.done_page.convert_more.connect(self._on_convert_more)
@@ -318,6 +323,7 @@ class MainWindow(QMainWindow):
         self.exported.clear()
         self._passwords.clear()
         self._password_queue.clear()
+        self._mode_overrides.clear()
         self._batch = []
         self._phase = "idle"
         self._cancelled = False
@@ -390,6 +396,9 @@ class MainWindow(QMainWindow):
         if not self._belongs_to_batch(path):
             log.debug("Resultado tardío descartado para %s (lote ya cerrado)", path)
             return
+        override = self._mode_overrides.get(path)
+        if override is not None and self._phase == "reanalyze":
+            report.mode = override if (override == "tables" or report.layout_pages) else "tables"
         self.reports[path] = report
         self.errors.pop(path, None)
         self.review_page.add_report(path, report)
@@ -474,6 +483,30 @@ class MainWindow(QMainWindow):
         else:
             self._start_export()
 
+    def _on_mode_changed(self, path: str, mode: str) -> None:
+        if mode in ("layout", "tables"):
+            self._mode_overrides[path] = mode  # type: ignore[assignment]
+
+    @staticmethod
+    def _sanitize_modes(reports: list[ConversionReport]) -> None:
+        """ "Igual al PDF" solo si el reporte trae el diseño de las páginas; si no, cae a tablas."""
+        for report in reports:
+            if report.mode == "layout" and not report.layout_pages:
+                report.mode = "tables"
+
+    def _apply_layout_preference(self) -> None:
+        """Cambió "Formato del Excel" en Opciones avanzadas: manda sobre las elecciones previas."""
+        self._mode_overrides.clear()
+        for report in self.reports.values():
+            if self.opts.layout == "auto":
+                report.mode = report.suggested_mode
+            else:
+                report.mode = self.opts.layout
+        self._sanitize_modes(list(self.reports.values()))
+        current = self.review_page.current_path()
+        if current in self.reports:
+            self.review_page.show_report(current)
+
     def _reanalyze_then_export(self) -> None:
         """Cambió una opción que afecta el análisis (p. ej. el tipado): se reanaliza y después se guarda."""
         paths = [p for p in self.order if p in self.reports]
@@ -484,6 +517,7 @@ class MainWindow(QMainWindow):
 
     def _start_export(self) -> None:
         reports = [self.reports[p] for p in self.order if p in self.reports]
+        self._sanitize_modes(reports)
         self._phase = "export"
         self.exported = {}
         self._batch = [str(r.source) for r in reports]
@@ -663,8 +697,11 @@ class MainWindow(QMainWindow):
     def open_settings(self) -> None:
         dialog = SettingsDialog(self.opts, self)
         if dialog.exec() == int(QDialog.DialogCode.Accepted):
+            previous_layout = self.opts.layout
             self.opts = dialog.options()
             save_options(self.opts)
+            if self.opts.layout != previous_layout:
+                self._apply_layout_preference()
 
     # ------------------------------------------------------------------ teclado y cierre
 

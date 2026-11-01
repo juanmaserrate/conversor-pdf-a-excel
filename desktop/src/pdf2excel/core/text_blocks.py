@@ -12,9 +12,11 @@ from typing import Any
 
 import pymupdf
 
+from pdf2excel.core.visibility import drop_hidden_words, hidden_spans
 from pdf2excel.models import TextItem
 
 Bbox = tuple[float, float, float, float]
+HiddenSpans = tuple[list[dict[str, Any]], list[dict[str, Any]]]  # (ocultos, visibles) de hidden_spans()
 
 KV_RE = re.compile(r"^([^:]{1,40}):\s*(.+)$")
 _SEPARATOR_RE = re.compile(r"\s+[—–|]\s+")  # " — ", " – ", " | "
@@ -27,16 +29,44 @@ def _clean(text: str) -> str:
     return _SPACES_RE.sub(" ", text.replace(" ", " ")).strip()
 
 
-def _text_blocks(page: Any) -> list[tuple[Bbox, str]]:
-    """Bloques de texto (sin imágenes) de la página, en orden de lectura.
+def _visible_blocks(page: Any, hidden: HiddenSpans) -> list[tuple[Bbox, str]]:
+    """Bloques de texto rearmados con las palabras visibles (sin lo tapado), en orden de lectura."""
+    words = drop_hidden_words(page.get_text("words"), hidden[0], hidden[1])
+    grouped: dict[int, dict[int, list[tuple]]] = {}
+    for w in words:
+        grouped.setdefault(int(w[5]), {}).setdefault(int(w[6]), []).append(w)
+    out: list[tuple[Bbox, str]] = []
+    for lines in grouped.values():
+        rects = [pymupdf.Rect(w[:4]) for ws in lines.values() for w in ws]
+        box = pymupdf.Rect(rects[0])
+        for r in rects[1:]:
+            box |= r
+        text = "\n".join(
+            " ".join(str(w[4]) for w in sorted(ws, key=lambda x: int(x[7])))
+            for _, ws in sorted(lines.items())
+        )
+        out.append(((box.x0, box.y0, box.x1, box.y1), text))
+    out.sort(key=lambda item: (round(item[0][1], 1), item[0][0]))
+    return out
+
+
+def _text_blocks(page: Any, hidden: HiddenSpans | None = None) -> list[tuple[Bbox, str]]:
+    """Bloques de texto (sin imágenes) de la página, en orden de lectura, sin el texto tapado/invisible.
 
     Los bbox se llevan al sistema de la página rotada (``page.rotation_matrix``) para compararlos con los
     bbox de tabla de ``find_tables``, que ya vienen rotados; con ``/Rotate 0`` la matriz es la identidad.
+    ``hidden`` (de ``hidden_spans``) evita recalcularlo cuando el llamador ya lo tiene.
     """
+    if hidden is None:
+        hidden = hidden_spans(page)
     out: list[tuple[Bbox, str]] = []
     rotated = bool(int(getattr(page, "rotation", 0) or 0) % 360)
     matrix = page.rotation_matrix if rotated else None
-    for block in page.get_text("blocks", sort=True):
+    if hidden[0]:
+        raw = [(*bb, text, 0, _TEXT_BLOCK) for bb, text in _visible_blocks(page, hidden)]
+    else:
+        raw = list(page.get_text("blocks", sort=True))
+    for block in raw:
         if len(block) > 6 and block[6] != _TEXT_BLOCK:
             continue
         rect = pymupdf.Rect(*(float(v) for v in block[:4]))
@@ -87,7 +117,9 @@ def line_items(page_no: int, line: str) -> list[TextItem]:
     return items
 
 
-def text_outside_tables(page: Any, table_bboxes: list[tuple]) -> list[TextItem]:
+def text_outside_tables(
+    page: Any, table_bboxes: list[tuple], hidden: HiddenSpans | None = None
+) -> list[TextItem]:
     """Texto de la página que no está dentro de una tabla, como ``TextItem`` kv/text.
 
     Se toman los bloques de texto cuya intersección con cualquier bbox de tabla es menor al 50 % de su
@@ -96,7 +128,7 @@ def text_outside_tables(page: Any, table_bboxes: list[tuple]) -> list[TextItem]:
     page_no = int(page.number)
     bboxes: list[Bbox] = [tuple(float(v) for v in b[:4]) for b in table_bboxes]  # type: ignore[misc]
     items: list[TextItem] = []
-    for bbox, text in _text_blocks(page):
+    for bbox, text in _text_blocks(page, hidden):
         if _overlaps_table(pymupdf.Rect(bbox), bboxes):
             continue
         for line in text.split("\n"):
@@ -105,7 +137,9 @@ def text_outside_tables(page: Any, table_bboxes: list[tuple]) -> list[TextItem]:
     return items
 
 
-def title_near(page: Any, bbox: tuple, max_gap_pt: float = 40) -> str | None:
+def title_near(
+    page: Any, bbox: tuple, max_gap_pt: float = 40, hidden: HiddenSpans | None = None
+) -> str | None:
     """Título de la tabla: bloque de una línea (≤ 60 chars, no kv) justo arriba del bbox.
 
     Su ``y1`` debe caer entre ``bbox[1] - max_gap_pt`` y ``bbox[1]`` y solaparse horizontalmente con la
@@ -113,7 +147,7 @@ def title_near(page: Any, bbox: tuple, max_gap_pt: float = 40) -> str | None:
     """
     x0, top, x1 = float(bbox[0]), float(bbox[1]), float(bbox[2])
     best: tuple[float, str] | None = None
-    for (bx0, _by0, bx1, by1), text in _text_blocks(page):
+    for (bx0, _by0, bx1, by1), text in _text_blocks(page, hidden):
         if not (top - max_gap_pt <= by1 <= top):
             continue
         if bx1 <= x0 or bx0 >= x1:

@@ -62,11 +62,14 @@ def _plural(n: int, singular: str, plural: str) -> str:
 
 def summary_line(report: ConversionReport, elapsed: float) -> str:
     """``✔ nombre.pdf → nombre.xlsx (3 tablas, 128 filas, 2 celdas para revisar, 2,3 s)``."""
-    parts = [
-        _plural(len(report.tables), "tabla", "tablas"),
-        _plural(report.n_rows, "fila", "filas"),
-    ]
-    if report.n_review:
+    if report.mode == "layout":
+        parts = [_plural(len(report.layout_pages), "hoja igual al PDF", "hojas iguales al PDF")]
+    else:
+        parts = [
+            _plural(len(report.tables), "tabla", "tablas"),
+            _plural(report.n_rows, "fila", "filas"),
+        ]
+    if report.n_review and report.mode == "tables":
         parts.append(_plural(report.n_review, "celda para revisar", "celdas para revisar"))
     if report.ocr_applied:
         parts.append("OCR")
@@ -89,6 +92,9 @@ def report_to_json(report: ConversionReport, elapsed: float) -> dict[str, Any]:
         "rows": report.n_rows,
         "review_cells": report.n_review,
         "ocr": report.ocr_applied,
+        "mode": report.mode,
+        "suggested_mode": report.suggested_mode,
+        "mode_reason": report.mode_reason,
         "warnings": list(report.warnings),
         "seconds": round(elapsed, 2),
     }
@@ -129,6 +135,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lang", default="spa+eng", metavar="IDIOMAS", help="idiomas de OCR para tesseract (spa+eng)"
     )
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--layout",
+        choices=("auto", "layout", "tables"),
+        default="auto",
+        help="formato del Excel: auto (la app elige), layout (igual al PDF) o tables (solo tablas de datos)",
+    )
+    mode_group.add_argument(
+        "--igual-al-pdf", dest="layout", action="store_const", const="layout", help="alias de --layout layout"
+    )
+    mode_group.add_argument(
+        "--solo-tablas", dest="layout", action="store_const", const="tables", help="alias de --layout tables"
+    )
+    parser.add_argument(
+        "--no-images", action="store_true", help="no incluir logos ni imágenes en el modo igual al PDF"
+    )
     parser.add_argument("--origin-sheet", action="store_true", help="mostrar la hoja Origen (diagnóstico)")
     parser.add_argument("--single-workbook", action="store_true", help="un solo libro para todo el lote")
     parser.add_argument("--json", action="store_true", help="imprimir un resumen JSON por archivo")
@@ -157,6 +179,8 @@ def options_from_args(args: argparse.Namespace) -> Options:
         open_when_done=False,
         show_origin_sheet=args.origin_sheet,
         single_workbook=args.single_workbook,
+        layout=args.layout,
+        layout_images=not args.no_images,
     )
 
 
@@ -211,6 +235,22 @@ def selftest(pdf: Path, report_path: Path | None = None) -> int:
             Path(report_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _selftest_layout(pdf: Path, tmp: Path) -> None:
+    """Además de las tablas, el modo "Igual al PDF" tiene que dejar una hoja por página con contenido."""
+    import openpyxl
+
+    from pdf2excel.core.pipeline import analyze, export
+
+    report = analyze(pdf, Options(output_dir=tmp, open_when_done=False, layout="layout"))
+    if not report.layout_pages:
+        raise RuntimeError(f"El modo Igual al PDF no generó ninguna página para {pdf.name}")
+    dst = export(report, Options(output_dir=tmp / "layout", open_when_done=False))
+    wb = openpyxl.load_workbook(dst)
+    visible = [ws for ws in wb.worksheets if ws.sheet_state == "visible"]
+    if len(visible) != len(report.layout_pages):
+        raise RuntimeError(f"Hojas igual al PDF: {len(visible)} para {len(report.layout_pages)} páginas")
+
+
 def _selftest(pdf: Path, out: Callable[..., None]) -> int:
     t0 = time.perf_counter()
     try:
@@ -230,7 +270,7 @@ def _selftest(pdf: Path, out: Callable[..., None]) -> int:
             previous_cache = os.environ.get(CACHE_DIR_ENV)
             os.environ[CACHE_DIR_ENV] = str(Path(tmp) / "cache")
             try:
-                report = convert(pdf, Options(output_dir=Path(tmp), open_when_done=False))
+                report = convert(pdf, Options(output_dir=Path(tmp), open_when_done=False, layout="tables"))
             finally:
                 if previous_cache is None:
                     os.environ.pop(CACHE_DIR_ENV, None)
@@ -249,6 +289,7 @@ def _selftest(pdf: Path, out: Callable[..., None]) -> int:
             if not table_sheets:
                 raise RuntimeError(f"Ninguna hoja con ≥ 2 filas y ≥ 2 columnas: {wb.sheetnames}")
             n_sheets = len(wb.sheetnames)
+            _selftest_layout(pdf, Path(tmp))
         elapsed = time.perf_counter() - t0
         out(f"selftest ok: {n_sheets} hojas, {report.n_rows} filas, ocr={report.ocr_applied}, {elapsed:.1f}s")
         return 0

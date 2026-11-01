@@ -8,7 +8,7 @@ hoja "Revisión" (si hay algo que revisar), "Datos del documento" (texto fuera d
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -23,6 +23,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from pdf2excel.errors import UserError, from_exception
 from pdf2excel.excel import styles
+from pdf2excel.excel.layout_writer import write_layout_sheets
 from pdf2excel.excel.naming import safe_sheet_name
 from pdf2excel.models import (
     CellValue,
@@ -46,6 +47,7 @@ _STAGE_LABELS = {
     "classify": "Clasificar páginas",
     "ocr": "Reconocer texto (OCR)",
     "tables": "Buscar tablas",
+    "layout": "Armar el diseño de la hoja",
     "typing": "Interpretar números y fechas",
     "excel": "Armar el Excel",
 }
@@ -314,8 +316,42 @@ def _write_text_sheet(wb: Workbook, items: list[TextItem], title: str) -> Worksh
     return ws
 
 
+_MODE_LABELS = {"layout": "Igual al PDF", "tables": "Solo tablas de datos"}
+_MAX_HIDDEN_LISTED = 200  # textos tapados que se listan en Origen (es diagnóstico, no un volcado)
+
+
+def _write_layout_origin(
+    ws: Worksheet, row: int, groups: Sequence[tuple[ConversionReport, list[str]]]
+) -> int:
+    """Hojas del modo "Igual al PDF" y textos tapados que se descartaron. Devuelve la fila siguiente."""
+    _write_header_row(ws, row, ["Hoja", "Página", "Palabras", "Celdas", "Imágenes"])
+    row += 1
+    hidden: list[tuple[str, str]] = []
+    for report, names in groups:
+        for page, sheet in zip(report.layout_pages, names, strict=False):
+            values: list[CellValue] = [sheet, page.page + 1, page.n_words, len(page.cells), len(page.images)]
+            for ci, val in enumerate(values, start=1):
+                _set_value(ws.cell(row=row, column=ci), val)
+            row += 1
+            hidden.extend((sheet, text) for text in page.hidden_texts)
+    row += 1
+    if hidden:
+        _write_header_row(ws, row, ["Texto tapado o invisible (no se copió)", "Hoja"])
+        row += 1
+        for sheet, text in hidden[:_MAX_HIDDEN_LISTED]:
+            _set_value(ws.cell(row=row, column=1), text)
+            _set_value(ws.cell(row=row, column=2), sheet)
+            row += 1
+        row += 1
+    return row
+
+
 def _write_origin_sheet(
-    wb: Workbook, report: ConversionReport, opts: Options, sheet_names: list[str]
+    wb: Workbook,
+    report: ConversionReport,
+    opts: Options,
+    sheet_names: list[str],
+    layout_groups: Sequence[tuple[ConversionReport, list[str]]] = (),
 ) -> Worksheet:
     ws = wb.create_sheet(SHEET_ORIGIN)
     bold = Font(bold=True)
@@ -334,11 +370,18 @@ def _write_origin_sheet(
     kv("OCR aplicado", "Sí" if report.ocr_applied else "No")
     kv("Versión", report.app_version or "")
     kv("Celdas para revisar", report.n_review)
+    kv("Modo", _MODE_LABELS.get(report.mode, report.mode))
+    if report.mode_reason:
+        kv("Motivo del modo", report.mode_reason)
     row += 1
 
-    _write_header_row(ws, row, ["Hoja", "Páginas", "Filas", "Columnas", "Fuente", "Puntaje"])
-    row += 1
-    for table, sheet in zip(report.tables, sheet_names, strict=True):
+    if layout_groups:
+        row = _write_layout_origin(ws, row, layout_groups)
+
+    if sheet_names:
+        _write_header_row(ws, row, ["Hoja", "Páginas", "Filas", "Columnas", "Fuente", "Puntaje"])
+        row += 1
+    for table, sheet in zip(report.tables, sheet_names, strict=False):
         first, last = table.pages
         pages = str(first + 1) if first == last else f"{first + 1}-{last + 1}"
         values: list[CellValue] = [
@@ -400,8 +443,17 @@ def _write_origin_sheet(
 # --------------------------------------------------------------------------- API
 
 
-def build_workbook(report: ConversionReport, opts: Options) -> Workbook:
-    """Arma el libro en memoria (sin guardarlo). `write_workbook` lo guarda."""
+def build_workbook(
+    report: ConversionReport,
+    opts: Options,
+    layout_reports: Sequence[tuple[str, ConversionReport]] = (),
+) -> Workbook:
+    """Arma el libro en memoria (sin guardarlo). `write_workbook` lo guarda.
+
+    ``report.mode == "layout"``: una hoja por página (``write_layout_sheets``), no tablas/texto/revisión.
+    ``layout_reports`` (lotes con un solo libro): reportes en modo layout que se suman, con su prefijo
+    (nombre del PDF), a las tablas del reporte combinado.
+    """
     wb = Workbook()
     default = wb.active
     if default is not None:
@@ -411,30 +463,44 @@ def build_workbook(report: ConversionReport, opts: Options) -> Workbook:
 
     used: set[str] = set()
     sheet_names: list[str] = []
-    for i, table in enumerate(report.tables, start=1):
-        name = _sheet_title_for(table, i, opts, used)
-        sheet_names.append(name)
-        ws = wb.create_sheet(name)
-        _write_table(ws, table)
+    layout_groups: list[tuple[ConversionReport, list[str]]] = []
+    layout_only = report.mode == "layout" and bool(report.layout_pages)
+    if layout_only:
+        names = write_layout_sheets(wb, report, opts, used)
+        layout_groups.append((report, names))
+    else:
+        for i, table in enumerate(report.tables, start=1):
+            name = _sheet_title_for(table, i, opts, used)
+            sheet_names.append(name)
+            ws = wb.create_sheet(name)
+            _write_table(ws, table)
 
-    if any(t.review_cells for t in report.tables):
-        _write_review_sheet(wb, report, sheet_names)
+        if any(t.review_cells for t in report.tables):
+            _write_review_sheet(wb, report, sheet_names)
 
-    if not report.tables:
-        # Sin tablas, el texto es lo único visible: va primero y se llama "Texto".
-        _write_text_sheet(wb, report.text_items, SHEET_TEXT)
-    elif opts.include_text and report.text_items:
-        _write_text_sheet(wb, report.text_items, SHEET_DOC_DATA)
+        if not report.tables and not layout_reports:
+            # Sin tablas, el texto es lo único visible: va primero y se llama "Texto".
+            _write_text_sheet(wb, report.text_items, SHEET_TEXT)
+        elif opts.include_text and report.text_items:
+            _write_text_sheet(wb, report.text_items, SHEET_DOC_DATA)
 
-    _write_origin_sheet(wb, report, opts, sheet_names)
+    for prefix, sub in layout_reports:
+        layout_groups.append((sub, write_layout_sheets(wb, sub, opts, used, prefix)))
+
+    _write_origin_sheet(wb, report, opts, sheet_names, layout_groups)
     wb.active = 0
     return wb
 
 
-def write_workbook(report: ConversionReport, dst: Path, opts: Options) -> None:
+def write_workbook(
+    report: ConversionReport,
+    dst: Path,
+    opts: Options,
+    layout_reports: Sequence[tuple[str, ConversionReport]] = (),
+) -> None:
     """Escribe el `.xlsx` en `dst` (crea la carpeta si falta). Errores de disco -> `UserError`."""
     dst = Path(dst)
-    wb = build_workbook(report, opts)
+    wb = build_workbook(report, opts, layout_reports)
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
         wb.save(dst)

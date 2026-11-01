@@ -121,7 +121,7 @@ class DonePage(QWidget):
         for path, err in errors.items():
             self._add_line(S.error_line(os.path.basename(path), err))
 
-        n_review = sum(r.n_review for r in reports)
+        n_review = sum(r.n_review for r in reports if not (r.mode == "layout" and r.layout_pages))
         if n_review > 0:
             # DONE_REVIEW_FMT no contempla el singular; review_cells_text sí ("1 celda marcada…").
             self.review_note.setText(f"⚠ {S.review_cells_text(n_review)}")

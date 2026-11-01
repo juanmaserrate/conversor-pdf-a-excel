@@ -14,7 +14,7 @@ from pdf2excel.ui import strings_es as S
 Mode = Literal["analyze", "export"]
 
 # Etapas cuyo (actual, total) cuenta páginas: solo ahí tiene sentido "página p de t".
-_PAGE_STAGES = frozenset({"classify", "ocr", "tables"})
+_PAGE_STAGES = frozenset({"classify", "ocr", "tables", "layout"})
 
 
 class ProgressPage(QWidget):

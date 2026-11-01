@@ -56,6 +56,18 @@ BTN_DISMISS = "Cerrar"
 
 REVIEW_TITLE = "Esto encontré"
 REVIEW_SUBTITLE = "Mirá la vista previa y, si está bien, guardá el Excel."
+FORMAT_LABEL = "Formato del Excel:"
+FORMAT_LAYOUT = "Igual al PDF"
+FORMAT_TABLES = "Solo tablas de datos"
+FORMAT_LAYOUT_TIP = "Una hoja por página, con las cajas, los textos y las imágenes en su lugar"
+FORMAT_TABLES_TIP = "Cada tabla en su hoja, limpia, lista para filtrar y sumar"
+FORMAT_LAYOUT_DISABLED_TIP = (
+    "Este PDF tiene demasiadas páginas para armar el diseño de cada una. "
+    'Si lo necesitás, elegí "Siempre igual al PDF" en Opciones avanzadas y volvé a cargarlo.'
+)
+LAYOUT_PAGE_COMBO_FMT = "Página {i} de {n}"
+LAYOUT_PREVIEW_NOTE = "Vista aproximada: en el Excel cada página queda en su propia hoja"
+LAYOUT_PREVIEW_EMPTY = "No hay diseño para mostrar"
 OPT_TYPED = "Convertir números y fechas (recomendado)"
 SAVE_LABEL = "Guardar:"
 SAVE_NEXT_TO_PDF = "Junto a cada PDF"
@@ -90,6 +102,7 @@ STAGE_TEXT: dict[str, str] = {
     "classify": "Revisando el PDF…",
     "ocr": "Leyendo el escaneo (OCR)… puede tardar ~2 s por página",
     "tables": "Buscando tablas…",
+    "layout": "Armando el diseño de la hoja…",
     "typing": "Interpretando números y fechas…",
     "excel": "Armando el Excel…",
 }
@@ -180,6 +193,13 @@ PASSWORD_WRONG = "La contraseña no es correcta. Probá de nuevo."
 ADVANCED_TITLE = "Opciones avanzadas"
 ADVANCED_INTRO = "Nadie las necesita el primer día: los valores por defecto andan bien."
 ADVANCED_OCR_LANG = "Idioma del OCR"
+ADVANCED_LAYOUT = "Formato del Excel"
+ADVANCED_LAYOUT_CHOICES: tuple[tuple[str, str], ...] = (
+    ("Automático (recomendado)", "auto"),
+    ("Siempre igual al PDF", "layout"),
+    ("Siempre solo tablas", "tables"),
+)
+ADVANCED_LAYOUT_TIP = 'Automático decide por cada PDF; después podés cambiarlo en la pantalla "Esto encontré"'
 ADVANCED_MERGE = "Unir tablas que continúan en otra página"
 ADVANCED_INCLUDE_TEXT = "Incluir texto fuera de tablas"
 ADVANCED_ONE_SHEET_PER_PAGE = "Una hoja por página"
@@ -211,6 +231,11 @@ def file_status(report: ConversionReport) -> str:
 
     "3 tablas · 3 pág." / "1 tabla · 2 pág. · escaneado, se leyó con OCR" / NO_TABLES.
     """
+    if report.mode == "layout" and report.layout_pages:
+        parts = [plural(len(report.layout_pages), "hoja igual al PDF", "hojas iguales al PDF")]
+        if report.ocr_applied:
+            parts.append(FILE_STATUS_OCR_NOTE)
+        return " · ".join(parts)
     n_tables = len(report.tables)
     if n_tables == 0:
         return NO_TABLES
@@ -225,7 +250,9 @@ def done_line(report: ConversionReport) -> str:
     src_name = report.source.name
     out_name = report.output_path.name if report.output_path else f"{report.source.stem}.xlsx"
     n_tables = len(report.tables)
-    if n_tables == 0:
+    if report.mode == "layout" and report.layout_pages:
+        detail = plural(len(report.layout_pages), "hoja igual al PDF", "hojas iguales al PDF")
+    elif n_tables == 0:
         detail = "sin tablas, texto completo"
     else:
         detail = f"{plural(n_tables, 'tabla', 'tablas')}, {plural(report.n_rows, 'fila', 'filas')}"

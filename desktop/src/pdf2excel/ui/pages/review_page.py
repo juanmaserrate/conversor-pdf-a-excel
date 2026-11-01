@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QKeyEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -16,17 +17,20 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QRadioButton,
     QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QTableView,
     QVBoxLayout,
     QWidget,
 )
 
 from pdf2excel.errors import UserError
-from pdf2excel.models import CellValue, ColumnInfo, ConversionReport, TypedTable
+from pdf2excel.models import CellValue, ColumnInfo, ConversionReport, EffectiveMode, TypedTable
 from pdf2excel.ui import strings_es as S
 from pdf2excel.ui.file_list import FileListWidget, FileState
+from pdf2excel.ui.layout_preview import LayoutPreview
 from pdf2excel.ui.preview_model import TablePreviewModel
 
 # Índices fijos del selector de carpeta; la carpeta elegida se inserta entre ambos.
@@ -76,6 +80,7 @@ class ReviewPage(QWidget):
 
     save_requested = Signal()
     back_requested = Signal()
+    mode_changed = Signal(str, str)  # (ruta del archivo, "layout" | "tables") elegido por el usuario
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -113,6 +118,36 @@ class ReviewPage(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(6)
 
+        # Selector "Formato del Excel" (por archivo) + la frase que explica la sugerencia.
+        self.format_box = QWidget(right)
+        format_layout = QVBoxLayout(self.format_box)
+        format_layout.setContentsMargins(0, 0, 0, 0)
+        format_layout.setSpacing(2)
+        format_row = QHBoxLayout()
+        format_row.setSpacing(10)
+        self.format_label = QLabel(S.FORMAT_LABEL, self.format_box)
+        format_row.addWidget(self.format_label)
+        self.layout_radio = QRadioButton(S.FORMAT_LAYOUT, self.format_box)
+        self.layout_radio.setToolTip(S.FORMAT_LAYOUT_TIP)
+        self.layout_radio.setAccessibleName(f"{S.FORMAT_LABEL} {S.FORMAT_LAYOUT}")
+        self.tables_radio = QRadioButton(S.FORMAT_TABLES, self.format_box)
+        self.tables_radio.setToolTip(S.FORMAT_TABLES_TIP)
+        self.tables_radio.setAccessibleName(f"{S.FORMAT_LABEL} {S.FORMAT_TABLES}")
+        self.format_group = QButtonGroup(self)
+        self.format_group.addButton(self.layout_radio)
+        self.format_group.addButton(self.tables_radio)
+        self.layout_radio.toggled.connect(self._on_format_toggled)
+        format_row.addWidget(self.layout_radio)
+        format_row.addWidget(self.tables_radio)
+        format_row.addStretch(1)
+        format_layout.addLayout(format_row)
+        self.mode_reason_label = QLabel("", self.format_box)
+        self.mode_reason_label.setObjectName("Muted")
+        self.mode_reason_label.setWordWrap(True)
+        format_layout.addWidget(self.mode_reason_label)
+        self.format_box.hide()
+        right_layout.addWidget(self.format_box)
+
         table_row = QHBoxLayout()
         table_row.setSpacing(8)
         self.table_combo = QComboBox(right)
@@ -143,7 +178,12 @@ class ReviewPage(QWidget):
         h_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table_view.verticalHeader().setDefaultSectionSize(22)
         self.table_view.verticalHeader().setVisible(False)
-        right_layout.addWidget(self.table_view, 1)
+        self.layout_preview = LayoutPreview(right)
+        self.layout_preview.setAccessibleName(S.REVIEW_TITLE)
+        self.preview_stack = QStackedWidget(right)
+        self.preview_stack.addWidget(self.table_view)
+        self.preview_stack.addWidget(self.layout_preview)
+        right_layout.addWidget(self.preview_stack, 1)
 
         self.review_label = QLabel(S.PREVIEW_EMPTY, right)
         self.review_label.setObjectName("Muted")
@@ -202,9 +242,12 @@ class ReviewPage(QWidget):
         layout.addLayout(buttons)
 
         # Orden de Tab: lista → tabla → casilla → carpeta → Volver → Guardar.
-        QWidget.setTabOrder(self.file_list, self.table_combo)
+        QWidget.setTabOrder(self.file_list, self.layout_radio)
+        QWidget.setTabOrder(self.layout_radio, self.tables_radio)
+        QWidget.setTabOrder(self.tables_radio, self.table_combo)
         QWidget.setTabOrder(self.table_combo, self.table_view)
-        QWidget.setTabOrder(self.table_view, self.typed_check)
+        QWidget.setTabOrder(self.table_view, self.layout_preview)
+        QWidget.setTabOrder(self.layout_preview, self.typed_check)
         QWidget.setTabOrder(self.typed_check, self.folder_combo)
         QWidget.setTabOrder(self.folder_combo, self.back_button)
         QWidget.setTabOrder(self.back_button, self.save_button)
@@ -288,6 +331,37 @@ class ReviewPage(QWidget):
                 self._show_empty(f"⚠ {title}. {detail}".strip())
             return
 
+        self._sync_format_selector(report)
+        if self._mode_of(report) == "layout":
+            self._show_layout(report)
+        else:
+            self._show_tables(report)
+
+    @staticmethod
+    def _mode_of(report: ConversionReport) -> EffectiveMode:
+        """Modo efectivo: sin ``layout_pages`` no hay "Igual al PDF" posible."""
+        return "layout" if report.mode == "layout" and report.layout_pages else "tables"
+
+    def _sync_format_selector(self, report: ConversionReport) -> None:
+        """Refleja ``report.mode`` / ``mode_reason`` en los radios (sin emitir señales)."""
+        has_layout = bool(report.layout_pages)
+        if report.mode == "layout" and not has_layout:
+            report.mode = "tables"  # lo que se exporta tiene que coincidir con lo que se ve
+        self.layout_radio.blockSignals(True)
+        self.layout_radio.setEnabled(has_layout)
+        self.layout_radio.setToolTip(S.FORMAT_LAYOUT_TIP if has_layout else S.FORMAT_LAYOUT_DISABLED_TIP)
+        self.layout_radio.setChecked(report.mode == "layout")
+        self.tables_radio.setChecked(report.mode != "layout")
+        self.layout_radio.blockSignals(False)
+        reason = report.mode_reason
+        self.mode_reason_label.setText(reason)
+        self.mode_reason_label.setVisible(bool(reason))
+        self.mode_reason_label.setAccessibleName(reason)
+        self.format_box.show()
+
+    def _show_tables(self, report: ConversionReport) -> None:
+        self.preview_stack.setCurrentWidget(self.table_view)
+        self.table_combo.setAccessibleName(S.TABLE_COMBO_FMT.format(i=1, n=max(1, len(report.tables))))
         self.table_combo.blockSignals(True)
         self.table_combo.clear()
         n = len(report.tables)
@@ -306,6 +380,30 @@ class ReviewPage(QWidget):
         self.table_combo.setCurrentIndex(0)
         self._render_table(0)
 
+    def _show_layout(self, report: ConversionReport) -> None:
+        self.preview_stack.setCurrentWidget(self.layout_preview)
+        self.scan_note.hide()
+        n = len(report.layout_pages)
+        self.table_combo.blockSignals(True)
+        self.table_combo.clear()
+        for i in range(n):
+            self.table_combo.addItem(S.LAYOUT_PAGE_COMBO_FMT.format(i=i + 1, n=n), i)
+        self.table_combo.setEnabled(n > 1)
+        self.table_combo.blockSignals(False)
+        self.table_combo.setAccessibleName(S.LAYOUT_PAGE_COMBO_FMT.format(i=1, n=n))
+        self.table_combo.setVisible(True)
+        self.table_combo.setCurrentIndex(0)
+        self._render_layout_page(0)
+
+    def _render_layout_page(self, index: int) -> None:
+        report = self._reports.get(self._current or "")
+        if report is None or not (0 <= index < len(report.layout_pages)):
+            return
+        page = report.layout_pages[index]
+        self.layout_preview.set_page(page)
+        self.sheet_label.setText(S.TABLE_PAGE_FMT.format(p=page.page + 1))
+        self._set_review_text("\n".join([S.LAYOUT_PREVIEW_NOTE, *page.warnings[:2]]), warn=False)
+
     def _show_empty(self, message: str) -> None:
         self.table_combo.blockSignals(True)
         self.table_combo.clear()
@@ -313,6 +411,9 @@ class ReviewPage(QWidget):
         self.table_combo.setVisible(False)
         self.sheet_label.setText("")
         self.scan_note.hide()
+        self.format_box.hide()
+        self.preview_stack.setCurrentWidget(self.table_view)
+        self.layout_preview.set_page(None)
         self.preview_model.set_table(None)
         self._set_review_text(message, warn=False)
 
@@ -409,12 +510,41 @@ class ReviewPage(QWidget):
         self._last_folder_index = self.folder_combo.currentIndex()
 
     def _on_typed_toggled(self, _checked: bool) -> None:
-        if self._current is not None and self._current in self._reports:
+        report = self._reports.get(self._current or "")
+        if report is not None and self._mode_of(report) == "tables":
             self._render_table(self.current_table_index())
 
     def _on_table_changed(self, index: int) -> None:
-        if index >= 0:
+        if index < 0:
+            return
+        report = self._reports.get(self._current or "")
+        if report is not None and self._mode_of(report) == "layout":
+            self._render_layout_page(index)
+        else:
             self._render_table(index)
+
+    def current_mode(self) -> EffectiveMode | None:
+        """Modo mostrado del archivo actual (``None`` si no hay reporte)."""
+        report = self._reports.get(self._current or "")
+        return None if report is None else self._mode_of(report)
+
+    def set_mode(self, mode: EffectiveMode) -> None:
+        """Cambia el formato del archivo actual (como si el usuario tocara el radio)."""
+        if mode == "layout" and not self.layout_radio.isEnabled():
+            return
+        (self.layout_radio if mode == "layout" else self.tables_radio).setChecked(True)
+
+    def _on_format_toggled(self, _checked: bool) -> None:
+        path = self._current
+        report = self._reports.get(path or "")
+        if path is None or report is None:
+            return
+        mode: EffectiveMode = "layout" if self.layout_radio.isChecked() else "tables"
+        if mode == report.mode:
+            return
+        report.mode = mode
+        self.show_report(path)
+        self.mode_changed.emit(path, mode)
 
     def _on_current_file_changed(self, path: str) -> None:
         if path != self._current:

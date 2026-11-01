@@ -28,6 +28,7 @@ from pdf2excel.core.cells import (
     words_in_rect,
 )
 from pdf2excel.core.quality import table_quality
+from pdf2excel.core.visibility import visible_words
 from pdf2excel.models import RawTable
 
 log = logging.getLogger(__name__)
@@ -50,12 +51,12 @@ def _find_tables(page: Any, union: bool) -> list[Any]:
 
 
 def words_for_page(page: Any) -> list[tuple]:
-    """``page.get_text("words")`` en el sistema de coordenadas de la página rotada (el de ``find_tables``).
+    """Palabras visibles de la página en el sistema de la página rotada (el de ``find_tables``).
 
     Con ``/Rotate 0`` es la lista tal cual; con 90/180/270 cada rect se multiplica por
     ``page.rotation_matrix`` (``Rect * Matrix`` normaliza x0 < x1, y0 < y1).
     """
-    words = list(page.get_text("words"))
+    words = visible_words(page)  # sin el texto tapado/invisible (los "N/A" que el PDF dibuja y después tapa)
     if not int(getattr(page, "rotation", 0) or 0) % 360:
         return words
     matrix = page.rotation_matrix

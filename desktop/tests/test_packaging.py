@@ -89,12 +89,14 @@ def test_update_check_offline_returns_none(monkeypatch: pytest.MonkeyPatch) -> N
     assert check_for_update("0.0.1", timeout=1) is None
 
 
-def test_update_check_default_url_without_network() -> None:
-    from pdf2excel.update_check import LATEST_URL, check_for_update, latest_url
+def test_update_check_default_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sin override, se consulta el latest.json del último release. No se sale a internet: con el release
+    publicado, una consulta real devolvería una actualización y el resultado dependería de la red."""
+    from pdf2excel.update_check import LATEST_URL, latest_url
 
+    monkeypatch.delenv("PDF2EXCEL_UPDATE_URL", raising=False)
     assert LATEST_URL.endswith("/releases/latest/download/latest.json")
     assert latest_url() == LATEST_URL
-    assert check_for_update("0.0.1", timeout=1) is None  # sin red (o con red y sin release): nunca lanza
 
 
 def test_update_check_newer_version(

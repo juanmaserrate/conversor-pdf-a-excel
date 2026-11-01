@@ -21,7 +21,7 @@ from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from pdf2excel.errors import ErrorCode, UserError
-from pdf2excel.models import ColumnInfo, ConversionReport, Options, PageInfo, TypedTable
+from pdf2excel.models import ColumnInfo, ConversionReport, LayoutPage, Options, PageInfo, TypedTable
 from pdf2excel.ui import strings_es as S
 from pdf2excel.ui.drop_zone import DropZone
 from pdf2excel.ui.file_list import FileListWidget
@@ -136,7 +136,7 @@ def test_errors_cover_all_codes() -> None:
         "{name} está abierto en Excel. Cerralo y tocá Reintentar.",
         "Reintentar",
     )
-    assert set(S.STAGE_TEXT) == {"classify", "ocr", "tables", "typing", "excel"}
+    assert set(S.STAGE_TEXT) == {"classify", "ocr", "tables", "layout", "typing", "excel"}
 
 
 def test_string_helpers(tmp_path: Path) -> None:
@@ -151,6 +151,20 @@ def test_string_helpers(tmp_path: Path) -> None:
 
     rep.output_path = tmp_path / "remito.xlsx"
     assert S.done_line(rep) == "✔ remito.pdf → remito.xlsx (3 tablas, 30 filas)"
+    rep.mode = "layout"
+    rep.layout_pages = [
+        LayoutPage(page=0, width_pt=100, height_pt=100, col_widths_pt=[100], row_heights_pt=[100]),
+        LayoutPage(page=1, width_pt=100, height_pt=100, col_widths_pt=[100], row_heights_pt=[100]),
+    ]
+    assert S.file_status(rep) == "2 hojas iguales al PDF"
+    assert S.done_line(rep) == "✔ remito.pdf → remito.xlsx (2 hojas iguales al PDF)"
+    form = make_report(tmp_path / "form.pdf", n_tables=0)
+    form.mode = "layout"
+    form.layout_pages = [
+        LayoutPage(page=0, width_pt=100, height_pt=100, col_widths_pt=[100], row_heights_pt=[100])
+    ]
+    assert S.file_status(form) == "1 hoja igual al PDF"
+    assert "sin tablas" not in S.done_line(form)
     err = UserError("encrypted")
     assert S.error_line("factura.pdf", err) == "⚠ factura.pdf: no se pudo leer, está protegido con contraseña"
     _title, detail, action = S.error_texts(UserError("file_in_use"), "remito.xlsx")

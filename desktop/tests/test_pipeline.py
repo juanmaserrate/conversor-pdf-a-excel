@@ -163,10 +163,21 @@ def test_export_next_to_pdf_by_default(corpus: Callable[[str], Path], tmp_path: 
     assert report.output_path == dst
 
 
-def test_progress_stages_in_order(corpus: Callable[[str], Path], tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("layout", "expected"),
+    [
+        ("tables", ["classify", "tables", "typing", "excel"]),  # "Solo tablas" no paga la etapa de diseño
+        ("auto", ["classify", "tables", "layout", "typing", "excel"]),
+    ],
+)
+def test_progress_stages_in_order(
+    corpus: Callable[[str], Path], tmp_path: Path, layout: str, expected: list[str]
+) -> None:
     calls: list[tuple[int, int, str]] = []
     pipeline.convert(
-        corpus("remito_grid.pdf"), _opts(tmp_path), progress=lambda c, t, s: calls.append((c, t, s))
+        corpus("remito_grid.pdf"),
+        _opts(tmp_path, layout=layout),
+        progress=lambda c, t, s: calls.append((c, t, s)),
     )
 
     stages = [s for _, _, s in calls]
@@ -174,7 +185,7 @@ def test_progress_stages_in_order(corpus: Callable[[str], Path], tmp_path: Path)
     for s in stages:
         if not order or order[-1] != s:
             order.append(s)
-    assert order == ["classify", "tables", "typing", "excel"]
+    assert order == expected
 
     for stage in order:
         of_stage = [(c, t) for c, t, s in calls if s == stage]

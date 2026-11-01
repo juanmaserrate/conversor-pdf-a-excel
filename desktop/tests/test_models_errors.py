@@ -31,7 +31,7 @@ def test_package_metadata() -> None:
     assert pdf2excel.__version__ == "0.1.0"
     assert pdf2excel.APP_NAME == "Conversor PDF a Excel"
     assert pdf2excel.APP_ID == "ConversorPDFaExcel"
-    assert STAGES == ("classify", "ocr", "tables", "typing", "excel")
+    assert STAGES == ("classify", "ocr", "tables", "layout", "typing", "excel")
 
 
 def test_models_module_has_no_logic() -> None:
