@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -135,6 +136,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--selftest", metavar="PDF", help="convertir PDF a una carpeta temporal y verificar (CI)"
     )
+    parser.add_argument(
+        "--selftest-report",
+        metavar="ARCHIVO",
+        help="escribir además el resultado del selftest en este archivo (bundle sin consola)",
+    )
     parser.add_argument("--version", action="version", version=f"{PROG} {__version__}")
     return parser
 
@@ -181,14 +187,31 @@ def _check_bundled_tesseract() -> None:
         raise RuntimeError(f"tesseract vendoreado en {vendored} pero find_tesseract() devolvió {found}")
 
 
-def selftest(pdf: Path) -> int:
+def selftest(pdf: Path, report_path: Path | None = None) -> int:
     """Convierte ``pdf`` a un tmpdir, relee el .xlsx y exige una hoja con ≥ 2 filas y ≥ 2 columnas.
 
     Usa una caché de OCR vacía (``PDF2EXCEL_CACHE_DIR`` apuntando al tmpdir) para que el OCR corra de
     verdad: con la caché del usuario poblada pasaría aunque tesseract estuviera roto. Si el bundle trae
     tesseract vendoreado, verifica que sea el que se usa. Imprime ``selftest ok: <hojas> hojas, <filas>
     filas, ocr=<bool>, <segundos>s`` y devuelve 0; cualquier fallo imprime el traceback y devuelve 1.
+
+    El bundle de Windows se construye sin consola (stdout va a la nada), así que el mismo texto se
+    escribe también en ``report_path`` si se indica: es lo que lee el CI.
     """
+    lines: list[str] = []
+
+    def out(text: str, *, err: bool = False) -> None:
+        _emit(text, err=err)
+        lines.append(text)
+
+    try:
+        return _selftest(pdf, out)
+    finally:
+        if report_path is not None:
+            Path(report_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _selftest(pdf: Path, out: Callable[..., None]) -> int:
     t0 = time.perf_counter()
     try:
         import openpyxl
@@ -227,15 +250,11 @@ def selftest(pdf: Path) -> int:
                 raise RuntimeError(f"Ninguna hoja con ≥ 2 filas y ≥ 2 columnas: {wb.sheetnames}")
             n_sheets = len(wb.sheetnames)
         elapsed = time.perf_counter() - t0
-        _emit(
-            f"selftest ok: {n_sheets} hojas, {report.n_rows} filas, ocr={report.ocr_applied}, {elapsed:.1f}s"
-        )
+        out(f"selftest ok: {n_sheets} hojas, {report.n_rows} filas, ocr={report.ocr_applied}, {elapsed:.1f}s")
         return 0
     except Exception:
-        _emit("selftest FALLO:", err=True)
-        if sys.stderr is not None:
-            traceback.print_exc()
-            sys.stderr.flush()
+        out("selftest FALLO:", err=True)
+        out(traceback.format_exc().rstrip(), err=True)
         return 1
 
 
@@ -310,7 +329,8 @@ def main(argv: list[str] | None = None) -> int:
     _setup_logging(args.verbose)
 
     if args.selftest:
-        return selftest(Path(args.selftest))
+        report_path = Path(args.selftest_report) if args.selftest_report else None
+        return selftest(Path(args.selftest), report_path)
 
     if not args.pdfs:
         parser.print_usage(sys.stderr)

@@ -48,7 +48,7 @@ python packaging\prune_qt.py dist\ConversorPDFaExcel
 
 # 5) Smoke: tiene que imprimir "selftest ok" (usa el OCR y el modelo de layout DENTRO del bundle)
 python -m tests.corpus.generate tests\corpus\_generated
-.\dist\ConversorPDFaExcel\ConversorPDFaExcel.exe --selftest tests\corpus\_generated\remito_grid_scan.pdf > selftest.log
+.\dist\ConversorPDFaExcel\ConversorPDFaExcel.exe --selftest tests\corpus\_generated\remito_grid_scan.pdf --selftest-report selftest.log
 type selftest.log
 
 # 6) Instalador -> dist\installer\ConversorPDFaExcel-0.1.0-setup-win64.exe
@@ -60,8 +60,9 @@ type selftest.log
 
 Notas:
 
-- El `.exe` tiene `console=False` (no abre ventana negra). Por eso `--selftest` se redirige a un archivo:
-  en una consola de PowerShell el texto puede no verse, pero con `> selftest.log` siempre queda escrito.
+- El `.exe` tiene `console=False` (no abre ventana negra): no tiene stdout, así que redirigir con `>`
+  deja el archivo vacío. Por eso `--selftest` acepta `--selftest-report archivo`: escribe ahí el mismo
+  texto (y el traceback si falla). El CI lee ese archivo.
 - Si PyInstaller falla con `FileNotFoundError ... pymupdf/layout/resources/onnx/*.yaml` al correr el
   bundle, es que falta `collect_data_files("pymupdf")` en el `.spec`: es **obligatorio**, no lo saques.
 - Si en el venv quedó instalado `opencv-python` (el completo) además de `opencv-python-headless`, el

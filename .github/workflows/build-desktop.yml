@@ -144,9 +144,11 @@ jobs:
         run: |
           PDF=tests/corpus/_generated/remito_grid_scan.pdf
           [ -f "$PDF" ] || PDF=tests/corpus/remito_grid_scan.pdf
-          "./dist/$APP_EXE/$APP_EXE.exe" --selftest "$PDF" > selftest.log 2>&1
+          # El exe no tiene consola (console=False): el resultado se lee del archivo de reporte.
+          rc=0
+          "./dist/$APP_EXE/$APP_EXE.exe" --selftest "$PDF" --selftest-report selftest.log || rc=$?
           cat selftest.log
-          grep -q "selftest ok" selftest.log
+          [ "$rc" = 0 ] && grep -q "selftest ok" selftest.log
 
       - name: Firmar el ejecutable (Authenticode, solo con certificado)
         if: env.HAS_WIN_CERT == 'true'
@@ -248,9 +250,10 @@ jobs:
         run: |
           PDF=tests/corpus/_generated/remito_grid_scan.pdf
           [ -f "$PDF" ] || PDF=tests/corpus/remito_grid_scan.pdf
-          "dist/$APP_EXE.app/Contents/MacOS/$APP_EXE" --selftest "$PDF" > selftest.log 2>&1
+          rc=0
+          "dist/$APP_EXE.app/Contents/MacOS/$APP_EXE" --selftest "$PDF" --selftest-report selftest.log || rc=$?
           cat selftest.log
-          grep -q "selftest ok" selftest.log
+          [ "$rc" = 0 ] && grep -q "selftest ok" selftest.log
 
       - name: codesign (solo con certificado Developer ID)
         if: env.HAS_APPLE_CERT == 'true'

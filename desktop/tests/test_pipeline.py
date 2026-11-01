@@ -427,6 +427,23 @@ def test_cli_selftest_ok(corpus: Callable[[str], Path]) -> None:
     assert "selftest ok" in proc.stdout
 
 
+def test_cli_selftest_report_file(corpus: Callable[[str], Path], tmp_path: Path) -> None:
+    """El bundle de Windows no tiene consola: el CI lee el resultado del archivo de reporte."""
+    report = tmp_path / "selftest.log"
+    proc = _run("--selftest", str(corpus("remito_grid.pdf")), "--selftest-report", str(report))
+    assert proc.returncode == 0, proc.stderr
+    assert "selftest ok" in report.read_text(encoding="utf-8")
+
+
+def test_selftest_report_file_has_traceback_on_failure(tmp_path: Path) -> None:
+    from pdf2excel import cli
+
+    report = tmp_path / "selftest.log"
+    assert cli.selftest(tmp_path / "no_existe.pdf", report) == 1
+    text = report.read_text(encoding="utf-8")
+    assert "selftest FALLO" in text and "FileNotFoundError" in text
+
+
 def test_selftest_uses_isolated_ocr_cache(
     corpus: Callable[[str], Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

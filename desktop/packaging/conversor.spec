@@ -5,7 +5,7 @@ Build (desde desktop/, con el paquete instalado: pip install -e .):
 
     pyinstaller --noconfirm --clean packaging/conversor.spec
     python packaging/prune_qt.py dist/ConversorPDFaExcel
-    dist/ConversorPDFaExcel/ConversorPDFaExcel --selftest tests/corpus/_generated/remito_grid_scan.pdf
+    dist/ConversorPDFaExcel/ConversorPDFaExcel --selftest tests/corpus/_generated/remito_grid_scan.pdf --selftest-report selftest.log
 
 Decisiones (ver docs/DESIGN.md §8):
 - onedir (onefile tarda 3-3,6 s en arrancar y molesta a los antivirus).
@@ -145,7 +145,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,  # sin ventana negra; --selftest igual escribe a stdout si está redirigido
+    console=False,  # sin ventana negra; --selftest escribe su resultado con --selftest-report
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
