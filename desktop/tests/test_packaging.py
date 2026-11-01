@@ -768,7 +768,7 @@ def test_workflow_pins_actions_and_has_required_jobs() -> None:
     assert wf["jobs"]["test"]["runs-on"] == "ubuntu-24.04"
     for snippet in (
         "packaging/fetch_tesseract.py resources",
-        'packaging/stamp_version.py "$GITHUB_REF_NAME"',
+        'packaging/stamp_version.py "$RELEASE_TAG"',
         "pyinstaller --noconfirm --clean packaging/conversor.spec",
         "packaging/prune_qt.py",
         "--selftest",
