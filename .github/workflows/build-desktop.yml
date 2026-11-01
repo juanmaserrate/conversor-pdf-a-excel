@@ -112,7 +112,7 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Caché de tesseract.exe + tessdata (clave = sha de fetch_tesseract.py)
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.3.0
         with:
           path: |
             desktop/resources/tesseract
