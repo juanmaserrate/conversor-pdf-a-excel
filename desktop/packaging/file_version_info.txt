@@ -1,0 +1,32 @@
+# UTF-8 — recurso VERSIONINFO del ConversorPDFaExcel.exe (pestaña "Detalles" de las Propiedades en Windows).
+# Lo lee PyInstaller vía `version=` en packaging/conversor.spec. Los números y las cadenas
+# FileVersion/ProductVersion los reescribe packaging/stamp_version.py a partir del tag.
+# Idioma 040A = español (Argentina usa el mismo bloque es-ES para VERSIONINFO), 04B0 = Unicode.
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(0, 1, 0, 0),
+    prodvers=(0, 1, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable('040A04B0', [
+        StringStruct('CompanyName', 'Equipo Conversor PDF a Excel'),
+        StringStruct('FileDescription', 'Conversor PDF a Excel: convierte PDFs en planillas de Excel'),
+        StringStruct('FileVersion', '0.1.0'),
+        StringStruct('InternalName', 'ConversorPDFaExcel'),
+        StringStruct('LegalCopyright', 'Licencia GNU AGPL-3.0 o posterior. Usa PyMuPDF (Artifex, AGPL).'),
+        StringStruct('OriginalFilename', 'ConversorPDFaExcel.exe'),
+        StringStruct('ProductName', 'Conversor PDF a Excel'),
+        StringStruct('ProductVersion', '0.1.0'),
+        StringStruct('Comments', 'Los archivos se convierten en tu computadora; no se suben a ningún lado.')
+      ])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1034, 1200])])
+  ]
+)

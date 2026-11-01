@@ -1,0 +1,353 @@
+# CI/CD de la app de escritorio (desktop/).
+#
+#   push a main / PR (solo si cambia desktop/**)  -> test -> build-windows + build-macos (artefactos 14 días)
+#   tag v*                                         -> lo mismo + release (setup, zip portable, dmg, latest.json)
+#   lunes 06:17 UTC                                -> pip-audit de las dependencias fijadas
+#
+# Secrets opcionales: WIN_CERT_PFX_B64 + WIN_CERT_PASSWORD (firma Authenticode);
+# APPLE_CERT_P12_B64 + APPLE_CERT_PASSWORD + APPLE_ID + APPLE_TEAM_ID + APPLE_APP_PASSWORD (codesign + notarización).
+# Sin secrets los pasos de firma se saltan y el build sigue (README explica el aviso de SmartScreen).
+name: build-desktop
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths: ["desktop/**", ".github/workflows/build-desktop.yml"]
+  pull_request:
+    paths: ["desktop/**", ".github/workflows/build-desktop.yml"]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"  # lunes 06:17 UTC: solo corre pip-audit
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+defaults:
+  run:
+    working-directory: desktop
+    shell: bash
+
+env:
+  PYTHON_VERSION: "3.13"
+  APP_EXE: ConversorPDFaExcel
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  # ------------------------------------------------------------------ lint + tipos + corpus
+  test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-python@v5.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: desktop/pyproject.toml
+
+      - name: Dependencias del sistema (tesseract spa, Qt offscreen, xvfb)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-spa \
+            libegl1 libxkbcommon0 libgl1 xvfb
+          tesseract --version | head -1
+
+      - name: Instalar el paquete (editable) con extras de desarrollo
+        run: python -m pip install -e ".[dev]"
+
+      - name: ruff
+        run: ruff check src tests
+
+      - name: mypy
+        run: mypy src
+
+      - name: Generar el corpus sintético
+        run: python -m tests.corpus.generate tests/corpus/_generated
+
+      - name: pytest (incluye tests lentos de OCR y corpus)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest -q --runslow --corpus-report corpus_report.md
+
+      - name: Reporte del corpus en el summary
+        if: always()
+        run: |
+          if [ -f corpus_report.md ]; then
+            { echo "## Corpus (celdas %, filas %, espurias %, tablas, fuente, segundos)"; cat corpus_report.md; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4.4.3
+        if: always()
+        with:
+          name: corpus-report
+          path: desktop/corpus_report.md
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # ------------------------------------------------------------------ Windows: onedir + setup + zip
+  build-windows:
+    needs: test
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      HAS_WIN_CERT: ${{ secrets.WIN_CERT_PFX_B64 != '' }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-python@v5.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+          cache: pip
+          cache-dependency-path: desktop/pyproject.toml
+
+      - name: Instalar el paquete (editable) con extras de desarrollo
+        run: python -m pip install -e ".[dev]"
+
+      - name: Caché de tesseract.exe + tessdata (clave = sha de fetch_tesseract.py)
+        uses: actions/cache@v4.1.2
+        with:
+          path: |
+            desktop/resources/tesseract
+            desktop/resources/tessdata
+          key: tesseract-win64-${{ hashFiles('desktop/packaging/fetch_tesseract.py') }}
+
+      - name: Descargar tesseract (UB-Mannheim) y tessdata_fast con sha256 verificado
+        # Las variables del repo TESSERACT_WIN_URL / TESSERACT_WIN_SHA256 (Settings → Variables) pisan las
+        # constantes del script sin tocar código (p. ej. un mirror o una versión nueva ya verificada).
+        env:
+          PDF2EXCEL_TESSERACT_WIN_URL: ${{ vars.TESSERACT_WIN_URL }}
+          PDF2EXCEL_TESSERACT_WIN_SHA256: ${{ vars.TESSERACT_WIN_SHA256 }}
+        run: python packaging/fetch_tesseract.py resources
+
+      - name: Estampar la versión del tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python packaging/stamp_version.py "$GITHUB_REF_NAME"
+
+      - name: PyInstaller (onedir)
+        run: pyinstaller --noconfirm --clean packaging/conversor.spec
+
+      - name: Podar Qt y binarios no usados
+        run: python packaging/prune_qt.py "dist/$APP_EXE"
+
+      - name: Corpus para el smoke
+        run: python -m tests.corpus.generate tests/corpus/_generated
+
+      - name: Smoke del bundle (OCR + layout ONNX dentro del onedir)
+        run: |
+          PDF=tests/corpus/_generated/remito_grid_scan.pdf
+          [ -f "$PDF" ] || PDF=tests/corpus/remito_grid_scan.pdf
+          "./dist/$APP_EXE/$APP_EXE.exe" --selftest "$PDF" > selftest.log 2>&1
+          cat selftest.log
+          grep -q "selftest ok" selftest.log
+
+      - name: Firmar el ejecutable (Authenticode, solo con certificado)
+        if: env.HAS_WIN_CERT == 'true'
+        shell: pwsh
+        env:
+          WIN_CERT_PFX_B64: ${{ secrets.WIN_CERT_PFX_B64 }}
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WIN_CERT_PFX_B64))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName | Select-Object -Last 1
+          $signArgs = @("sign", "/f", "$env:RUNNER_TEMP\cert.pfx", "/p", $env:WIN_CERT_PASSWORD,
+            "/fd", "SHA256", "/tr", "http://timestamp.digicert.com", "/td", "SHA256")
+          & $signtool.FullName @signArgs "dist\$env:APP_EXE\$env:APP_EXE.exe"
+
+      - name: Instalador Inno Setup
+        run: '"C:/Program Files (x86)/Inno Setup 6/ISCC.exe" packaging/installer.iss'
+
+      - name: Firmar el instalador (solo con certificado)
+        if: env.HAS_WIN_CERT == 'true'
+        shell: pwsh
+        env:
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+        run: |
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName | Select-Object -Last 1
+          $setup = Get-ChildItem dist\installer\*.exe | Select-Object -First 1
+          $signArgs = @("sign", "/f", "$env:RUNNER_TEMP\cert.pfx", "/p", $env:WIN_CERT_PASSWORD,
+            "/fd", "SHA256", "/tr", "http://timestamp.digicert.com", "/td", "SHA256")
+          & $signtool.FullName @signArgs $setup.FullName
+          Remove-Item "$env:RUNNER_TEMP\cert.pfx" -Force
+
+      - name: Zip portable
+        run: |
+          VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); import pdf2excel; print(pdf2excel.__version__)")
+          7z a -mx=7 "dist/installer/$APP_EXE-$VERSION-portable-win64.zip" "./dist/$APP_EXE"
+
+      - name: Tamaños en el summary
+        run: |
+          {
+            echo "## Windows"
+            echo '```'
+            du -sh "dist/$APP_EXE" | sed 's/^/onedir   /'
+            du -sh dist/installer/*.exe dist/installer/*.zip | sed 's/^/salida   /'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4.4.3
+        with:
+          name: windows
+          path: |
+            desktop/dist/installer/*.exe
+            desktop/dist/installer/*.zip
+          retention-days: 14
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ macOS: .app + .dmg
+  build-macos:
+    needs: test
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERT_P12_B64 != '' }}
+      HAS_APPLE_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-python@v5.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: desktop/pyproject.toml
+
+      - name: tesseract del sistema (brew)
+        run: brew install tesseract tesseract-lang
+
+      - name: Instalar el paquete (editable) con extras de desarrollo
+        run: python -m pip install -e ".[dev]"
+
+      - name: tessdata_fast para el bundle
+        run: python packaging/fetch_tesseract.py resources
+
+      - name: Estampar la versión del tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python packaging/stamp_version.py "$GITHUB_REF_NAME"
+
+      - name: PyInstaller (.app)
+        run: pyinstaller --noconfirm --clean packaging/conversor.spec
+
+      - name: Podar Qt
+        run: python packaging/prune_qt.py "dist/$APP_EXE.app"
+
+      - name: Corpus para el smoke
+        run: python -m tests.corpus.generate tests/corpus/_generated
+
+      - name: Smoke del bundle
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          PDF=tests/corpus/_generated/remito_grid_scan.pdf
+          [ -f "$PDF" ] || PDF=tests/corpus/remito_grid_scan.pdf
+          "dist/$APP_EXE.app/Contents/MacOS/$APP_EXE" --selftest "$PDF" > selftest.log 2>&1
+          cat selftest.log
+          grep -q "selftest ok" selftest.log
+
+      - name: codesign (solo con certificado Developer ID)
+        if: env.HAS_APPLE_CERT == 'true'
+        env:
+          APPLE_CERT_P12_B64: ${{ secrets.APPLE_CERT_P12_B64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASS=$(openssl rand -hex 16)
+          echo "$APPLE_CERT_P12_B64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | awk -F'"' 'NR==1{print $2}')
+          codesign --deep --force --options runtime --timestamp --sign "$IDENTITY" "dist/$APP_EXE.app"
+          codesign --verify --deep --strict "dist/$APP_EXE.app"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: .dmg
+        run: |
+          VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); import pdf2excel; print(pdf2excel.__version__)")
+          hdiutil create -volname "Conversor PDF a Excel" -srcfolder "dist/$APP_EXE.app" -ov -format UDZO \
+            "dist/$APP_EXE-$VERSION-mac.dmg"
+          du -sh "dist/$APP_EXE.app" dist/*.dmg
+          { echo "## macOS"; echo '```'; du -sh "dist/$APP_EXE.app" dist/*.dmg; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notarizar (solo con credenciales de Apple)
+        if: env.HAS_APPLE_CERT == 'true' && env.HAS_APPLE_NOTARY == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          DMG=$(ls dist/*.dmg | head -1)
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "$DMG"
+
+      - uses: actions/upload-artifact@v4.4.3
+        with:
+          name: macos
+          path: desktop/dist/*.dmg
+          retention-days: 14
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ Release en tags v*
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4.1.8
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: latest.json para el chequeo de actualizaciones de la app
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SETUP=$(basename "$(ls out/*-setup-win64.exe | head -1)")
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases"
+          printf '{"version":"%s","url":"%s/download/%s/%s","notes_url":"%s/tag/%s"}\n' \
+            "$VERSION" "$BASE" "$GITHUB_REF_NAME" "$SETUP" "$BASE" "$GITHUB_REF_NAME" > out/latest.json
+          cat out/latest.json
+          ls -la out
+
+      - uses: softprops/action-gh-release@v2.1.0
+        with:
+          files: |
+            out/*.exe
+            out/*.zip
+            out/*.dmg
+            out/latest.json
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+  # ------------------------------------------------------------------ Auditoría semanal de dependencias
+  pip-audit:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-python@v5.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: pip-audit sobre las dependencias fijadas
+        run: |
+          python -m pip install -e ".[dev]" pip-audit
+          pip-audit --progress-spinner off --desc on

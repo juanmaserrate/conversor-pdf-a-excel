@@ -1,0 +1,160 @@
+/* Conversor PDF a Excel — tema claro.
+   Acento #1F6FEB, texto #1F2328, fondo #FFFFFF.
+   No se fuerza fondo ni color en los widgets base (QWidget, QListWidget, QTableView...): así la paleta
+   del sistema (incluido el modo oscuro) sigue mandando y solo se tiñen los elementos propios. */
+
+QMainWindow, QDialog {
+    background: #FFFFFF;
+    color: #1F2328;
+}
+
+QLabel#PageTitle {
+    font-size: 20pt;
+    font-weight: 600;
+    color: #1F2328;
+}
+
+QLabel#Muted {
+    color: #656D76;
+}
+
+/* ---- botones ---------------------------------------------------------- */
+
+QPushButton {
+    padding: 7px 18px;
+    border: 1px solid #9AA4B2;
+    border-radius: 8px;
+    min-height: 20px;
+}
+
+QPushButton:hover {
+    border-color: #1F6FEB;
+}
+
+QPushButton:disabled {
+    color: #8C959F;
+    border-color: #D0D7DE;
+}
+
+QPushButton[primary="true"] {
+    background: #1F6FEB;
+    color: #FFFFFF;
+    border: 1px solid #1F6FEB;
+    font-weight: 600;
+    padding: 8px 22px;
+}
+
+QPushButton[primary="true"]:hover {
+    background: #1A5FCC;
+    border-color: #1A5FCC;
+}
+
+QPushButton[primary="true"]:pressed {
+    background: #154DA6;
+}
+
+QPushButton[primary="true"]:disabled {
+    background: #9AB8EE;
+    border-color: #9AB8EE;
+    color: #FFFFFF;
+}
+
+QPushButton[flat="true"], QToolButton {
+    border: none;
+    background: transparent;
+    padding: 4px;
+}
+
+/* ---- foco visible en todo lo interactivo ------------------------------- */
+
+QPushButton:focus, QToolButton:focus, QCheckBox:focus, QComboBox:focus,
+QLineEdit:focus, QListWidget:focus, QTableView:focus, QFrame#DropZone:focus {
+    outline: 2px solid #1F6FEB;
+    outline-offset: 2px;
+}
+
+QLineEdit:focus, QComboBox:focus {
+    border: 2px solid #1F6FEB;
+}
+
+/* ---- zona de arrastre --------------------------------------------------- */
+
+QFrame#DropZone {
+    border: 2px dashed #9AA4B2;
+    border-radius: 12px;
+    background: transparent;
+}
+
+QFrame#DropZone:hover {
+    border-color: #6E7781;
+}
+
+QFrame#DropZone[active="true"] {
+    border: 2px dashed #1F6FEB;
+    background: rgba(31, 111, 235, 0.06);
+}
+
+QFrame#DropZone QLabel#DropTitle {
+    font-size: 18pt;
+    font-weight: 600;
+}
+
+QFrame#DropZone QLabel#DropSubtitle {
+    font-size: 11pt;
+    color: #656D76;
+}
+
+/* ---- lista de archivos y vista previa ----------------------------------- */
+
+QListWidget#FileList::item {
+    padding: 4px;
+    border-radius: 6px;
+}
+
+QListWidget#FileList::item:selected {
+    background: rgba(31, 111, 235, 0.14);
+    color: #1F2328;
+}
+
+QHeaderView::section {
+    background: #1F4E78;
+    color: #FFFFFF;
+    padding: 4px 6px;
+    border: none;
+    border-right: 1px solid #FFFFFF;
+    font-weight: 600;
+}
+
+QTableView {
+    gridline-color: #D0D7DE;
+    selection-background-color: rgba(31, 111, 235, 0.18);
+    selection-color: #1F2328;
+}
+
+/* ---- progreso ----------------------------------------------------------- */
+
+QProgressBar {
+    border: 1px solid #D0D7DE;
+    border-radius: 6px;
+    text-align: center;
+    min-height: 16px;
+}
+
+QProgressBar::chunk {
+    background: #1F6FEB;
+    border-radius: 5px;
+}
+
+/* ---- avisos ------------------------------------------------------------- */
+
+QLabel#WarnNote {
+    background: #FFF2CC;
+    color: #5C4400;
+    border: 1px solid #F5D77A;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+
+QLabel#UpdateNote {
+    color: #1F6FEB;
+}

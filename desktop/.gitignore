@@ -1,0 +1,33 @@
+# --- Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Build / empaquetado (PyInstaller, Inno Setup)
+build/
+dist/
+*.spec.bak
+*.manifest
+
+# --- Binarios de OCR que baja packaging/fetch_tesseract.py (nunca se commitean)
+resources/tessdata/
+resources/tesseract/
+
+# --- Corpus de tests
+tests/corpus/_generated/
+tests/corpus/*.pdf
+tests/corpus_real/
+corpus_report.md
+
+# --- Logs y archivos temporales
+*.log
+selftest*.xlsx
+.DS_Store
+Thumbs.db

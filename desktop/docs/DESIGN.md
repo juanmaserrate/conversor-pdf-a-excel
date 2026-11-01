@@ -368,6 +368,9 @@ Para cada página (del PDF original o del OCR'd):
   espacios, quita guiones de corte a fin de línea, `strip(" |")`.
 - `extend_tail`: renglones debajo del bbox con gap < 20 pt cuyas palabras caen todas dentro de los rangos x de
   las columnas y con ≥ 2 celdas no vacías → se agregan (Subtotal / IVA / TOTAL con SPAN y sin grilla).
+  *Cambio en integración:* además, al menos una celda del renglón debe parsear como número, porcentaje o
+  fecha (`typing_ar`); si no, se corta. Motivo: en `hard_lista_mixta` absorbía el párrafo de prosa que sigue
+  a la tabla (8,3 % de filas espurias → 0 %); los totales reales siempre traen un importe.
 - `merge_ghost_columns`: columnas adyacentes mutuamente excluyentes donde una tiene ≤ 2 celdas → se unen.
 
 ### 5.4 Puntaje y selección (`table_quality`, `select_best`)

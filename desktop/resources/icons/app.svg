@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Conversor PDF a Excel: hoja de papel con "PDF" → flecha → tabla. Colores 1F6FEB / 1F4E78. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1F6FEB"/>
+      <stop offset="1" stop-color="#1F4E78"/>
+    </linearGradient>
+  </defs>
+  <!-- fondo redondeado -->
+  <rect x="8" y="8" width="240" height="240" rx="48" ry="48" fill="url(#bg)"/>
+  <!-- hoja PDF (izquierda) con esquina doblada -->
+  <path d="M40 60 h56 l20 20 v100 h-76 z" fill="#FFFFFF"/>
+  <path d="M96 60 v20 h20 z" fill="#BFD6F6"/>
+  <text x="68" y="150" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="30" font-weight="700"
+        fill="#1F4E78" text-anchor="middle">PDF</text>
+  <!-- líneas de texto en la hoja -->
+  <rect x="50" y="94" width="40" height="5" rx="2.5" fill="#BFD6F6"/>
+  <rect x="50" y="106" width="56" height="5" rx="2.5" fill="#BFD6F6"/>
+  <rect x="50" y="118" width="48" height="5" rx="2.5" fill="#BFD6F6"/>
+  <!-- flecha -->
+  <path d="M124 128 h22 v-14 l24 22 -24 22 v-14 h-22 z" fill="#FFFFFF" opacity="0.95"/>
+  <!-- tabla (derecha) -->
+  <rect x="176" y="60" width="44" height="120" rx="4" fill="#FFFFFF"/>
+  <rect x="176" y="60" width="44" height="22" rx="4" fill="#1F4E78"/>
+  <rect x="176" y="78" width="44" height="4" fill="#1F4E78"/>
+  <g stroke="#1F6FEB" stroke-width="3">
+    <line x1="198" y1="82" x2="198" y2="180"/>
+    <line x1="176" y1="106" x2="220" y2="106"/>
+    <line x1="176" y1="130" x2="220" y2="130"/>
+    <line x1="176" y1="154" x2="220" y2="154"/>
+  </g>
+</svg>

@@ -1,0 +1,101 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdf2excel"
+dynamic = ["version"]
+description = "Conversor PDF a Excel: app de escritorio que convierte PDFs (digitales y escaneados) en planillas .xlsx prolijas y tipadas."
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [{ name = "Juan Manuel Serrate" }]
+keywords = ["pdf", "excel", "xlsx", "ocr", "tablas", "argentina"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: X11 Applications :: Qt",
+  "Environment :: Win32 (MS Windows)",
+  "Intended Audience :: End Users/Desktop",
+  "Natural Language :: Spanish",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Office/Business",
+]
+dependencies = [
+  "PySide6-Essentials==6.12.*",
+  "pymupdf==2.0",
+  "pymupdf-layout==2.0",
+  "onnxruntime==1.31.1",
+  "opencv-python-headless==5.0.*",
+  "numpy>=2",
+  "openpyxl==3.1.5",
+  "platformdirs>=4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-qt",
+  "reportlab",
+  "pillow",
+  "ruff",
+  "mypy",
+  "pyinstaller==6.22.*",
+]
+
+[project.scripts]
+conversor-pdf-a-excel = "pdf2excel.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/juanmaserrate/conversor-pdf-a-excel"
+Issues = "https://github.com/juanmaserrate/conversor-pdf-a-excel/issues"
+
+[tool.hatch.version]
+path = "src/pdf2excel/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdf2excel"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/pdf2excel", "resources/icons", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["tests/corpus", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+  "RUF001", # caracteres unicode ambiguos en strings: usamos tildes/guiones largos en castellano
+  "RUF002", # idem en docstrings
+  "RUF003", # idem en comentarios
+  "RUF012", # defaults mutables en clases Qt
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pdf2excel"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+explicit_package_bases = true
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+strict_equality = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "slow: tests lentos (OCR, corpus completo)",
+  "ui: tests que levantan widgets Qt (pytest-qt, QT_QPA_PLATFORM=offscreen)",
+]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning:shiboken6", "ignore::DeprecationWarning:PySide6"]
