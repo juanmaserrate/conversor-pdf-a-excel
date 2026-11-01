@@ -226,7 +226,7 @@ def _selftest(pdf: Path, out: Callable[..., None]) -> int:
         if "pymupdf.layout" not in sys.modules:
             raise RuntimeError("pymupdf.layout no se importó: el modelo de layout no está disponible")
         _check_bundled_tesseract()
-        with tempfile.TemporaryDirectory(prefix="pdf2excel-selftest-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="pdf2excel-selftest-", ignore_cleanup_errors=True) as tmp:
             previous_cache = os.environ.get(CACHE_DIR_ENV)
             os.environ[CACHE_DIR_ENV] = str(Path(tmp) / "cache")
             try:

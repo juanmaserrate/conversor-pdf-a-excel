@@ -361,3 +361,30 @@ def test_ocr_page_into_rotated_scan(tmp_path: Path) -> None:
         text = page.get_text()
         assert "A-100" in text
         assert "Mezcal" in text
+
+
+def _open_fds_under(directory: Path) -> list[str]:
+    """Rutas de los descriptores abiertos por este proceso dentro de ``directory`` (solo Linux)."""
+    found = []
+    for fd in os.listdir("/proc/self/fd"):
+        try:
+            target = os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            continue
+        if target.startswith(str(directory)):
+            found.append(target)
+    return found
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").exists(), reason="necesita /proc/self/fd (Linux)")
+def test_ocr_page_into_does_not_keep_temp_files_open(tmp_path: Path) -> None:
+    """Regresión Windows: show_pdf_page dejaba t<N>.pdf abierto desde el destino y el tmpdir no se podía
+    borrar (WinError 32). En Linux se ve como un descriptor abierto dentro del workdir."""
+    scan = _corpus_copy(tmp_path, "remito_grid_scan.pdf")
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    out = pymupdf.open()
+    with pymupdf.open(scan) as src_doc:
+        ocr.ocr_page_into(src_doc[0], out, workdir=workdir)
+    assert _open_fds_under(workdir) == []
+    assert len(out[0].get_text().strip()) > 50  # la capa de texto sí quedó incrustada

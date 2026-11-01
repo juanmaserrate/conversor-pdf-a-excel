@@ -206,7 +206,7 @@ def detect_orientation(gray: np.ndarray, src_dpi: int = DEFAULT_DPI) -> int:
     scale = OSD_DPI / float(src_dpi) if src_dpi > 0 else 0.5
     small = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA) if scale < 1 else gray
     try:
-        with tempfile.TemporaryDirectory(prefix="pdf2excel-osd-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="pdf2excel-osd-", ignore_cleanup_errors=True) as tmp:
             png = Path(tmp) / "osd.png"
             _write_png(png, small)
             cmd = [str(exe), str(png), "-", "--psm", "0", "-l", "osd", "--dpi", str(OSD_DPI)]
@@ -372,7 +372,9 @@ def ocr_page_into(
         width, height = height, width
     new_page = dst_doc.new_page(width=width, height=height)
     new_page.insert_image(new_page.rect, stream=_encode_jpeg(gray))
-    with pymupdf.open(text_pdf) as text_doc:
+    # Desde memoria, no por ruta: show_pdf_page deja el documento origen referenciado desde el destino
+    # hasta que éste se cierra, y en Windows ese handle abierto impide borrar el tmpdir (WinError 32).
+    with pymupdf.open("pdf", text_pdf.read_bytes()) as text_doc:
         new_page.show_pdf_page(new_page.rect, text_doc, 0)
 
     n_chars = len(new_page.get_text().strip())
@@ -499,7 +501,9 @@ def ocr_document(
         total = len(wanted)
         with (
             pymupdf.open() as out,
-            tempfile.TemporaryDirectory(prefix="pdf2excel-ocr-") as tmp,
+            # ignore_cleanup_errors: un antivirus de Windows puede retener un archivo recién escrito;
+            # un tmpdir que no se pudo borrar nunca debe hacer fallar la conversión.
+            tempfile.TemporaryDirectory(prefix="pdf2excel-ocr-", ignore_cleanup_errors=True) as tmp,
         ):
             workdir = Path(tmp)
             done = 0

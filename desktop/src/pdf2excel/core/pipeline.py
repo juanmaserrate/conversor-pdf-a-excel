@@ -183,7 +183,9 @@ def _analyze(
     work_path = src
     if _is_encrypted(doc):
         # Autenticado con contraseña: page_candidates reabre el archivo → copia sin cifrar en un tmpdir.
-        workdir = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="pdf2excel-")))
+        workdir = Path(
+            stack.enter_context(tempfile.TemporaryDirectory(prefix="pdf2excel-", ignore_cleanup_errors=True))
+        )
         work_path = _decrypted_copy(doc, src, workdir)
 
     # 2. OCR (una vez por documento) solo si hace falta.
